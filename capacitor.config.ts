@@ -1,8 +1,8 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 /**
- * server.url 을 지정하지 않으므로 웹 자산(dist)이 앱 안에 번들된다.
- * CapacitorHttp 를 켜면 fetch 가 네이티브로 처리되어 Riot API 호출 시 CORS 문제가 없다.
+ * server.url 을 지정하지 않으므로 웹 자산(dist)이 앱 안에 번들되어
+ * 실행할 때 웹에서 내려받는 데이터가 없다.
  */
 const config: CapacitorConfig = {
   appId: 'com.example.valorantshop', // 스토어 등록 전에 본인 도메인으로 변경
@@ -11,9 +11,6 @@ const config: CapacitorConfig = {
   backgroundColor: '#0F1923',
   ios: { contentInset: 'always' },
   android: { allowMixedContent: false },
-  plugins: {
-    CapacitorHttp: { enabled: true },
-  },
 };
 
 export default config;

@@ -1,37 +1,20 @@
 export type SkinTier = 'Select' | 'Deluxe' | 'Premium' | 'Exclusive' | 'Ultra';
 
-/** none: 효과 없음 / aura: 파동+별빛 / sparks: 불꽃 폭발 / storm: 번개+충격파 */
-export type TierEffect = 'none' | 'aura' | 'sparks' | 'storm';
-
-export interface SkinChroma {
-  id: string;
-  name: string;
-  imageUrl: string;
-  swatchUrl: string | null;
-}
-
 export interface ValorantSkin {
-  /** 상점 OfferID (= 스킨 레벨 UUID) */
   id: string;
   name: string;
-  /** 총기 종류 (예: Vandal) */
+  /** 총기 종류 (예: Vandal, Phantom) */
   weapon: string;
-  /** VP 가격 */
+  /** 기본 VP 가격 */
   price: number;
   tier: SkinTier;
-  /** 실제 스킨 이미지 URL */
   imageUrl: string;
-  chromas: SkinChroma[];
-  levelCount: number;
 }
 
 export interface DailyShop {
   skins: ValorantSkin[];
-  remainingSeconds: number;
-  /** 불러온 시각 (epoch ms) */
-  fetchedAt: number;
-  /** 지갑의 보유 VP (조회 실패 시 null) */
-  vp: number | null;
+  /** 로테이션 종료까지 남은 초 (선택) */
+  remainingSeconds?: number;
 }
 
 export interface VpPackage {
@@ -53,15 +36,19 @@ export interface VpRecommendation {
   description: string;
   purchases: PackagePurchase[];
   packageCount: number;
+  /** 구매로 얻는 총 VP */
   totalVp: number;
   totalPriceKrw: number;
+  /** 스킨 구매 후 남는 VP */
   residualVp: number;
+  /** 1원당 VP */
   vpPerKrw: number;
 }
 
 export interface VpRecommendationSet {
   requiredVp: number;
   ownedVp: number;
+  /** max(0, requiredVp - ownedVp) */
   neededVp: number;
   bestValue: VpRecommendation | null;
   exact: VpRecommendation | null;
@@ -71,16 +58,61 @@ export interface VpRecommendationSet {
 export interface TierStyle {
   label: string;
   color: string;
+  /** box-shadow 용 반투명 색 */
+  glow: string;
+  /** 카드 배경 그라데이션 시작색 */
   from: string;
-  effect: TierEffect;
+  particleColors: string[];
+  particleCount: number;
+  shake: boolean;
 }
 
 export const TIER_STYLES: Record<SkinTier, TierStyle> = {
-  Select: { label: 'Select', color: '#00C2FF', from: '#0B3A52', effect: 'none' },
-  Deluxe: { label: 'Deluxe', color: '#2BFFA0', from: '#0B4A38', effect: 'none' },
-  Premium: { label: 'Premium', color: '#FF5CAD', from: '#4A1A55', effect: 'aura' },
-  Exclusive: { label: 'Exclusive', color: '#FFC94D', from: '#5A3A0A', effect: 'sparks' },
-  Ultra: { label: 'Ultra', color: '#FFD54A', from: '#5E1620', effect: 'storm' },
+  Select: {
+    label: 'Select',
+    color: '#00C2FF',
+    glow: 'rgba(0, 194, 255, 0.55)',
+    from: '#0B3A52',
+    particleColors: [],
+    particleCount: 0,
+    shake: false,
+  },
+  Deluxe: {
+    label: 'Deluxe',
+    color: '#2BFFA0',
+    glow: 'rgba(43, 255, 160, 0.5)',
+    from: '#0B4A38',
+    particleColors: [],
+    particleCount: 0,
+    shake: false,
+  },
+  Premium: {
+    label: 'Premium',
+    color: '#FF5CAD',
+    glow: 'rgba(182, 107, 255, 0.6)',
+    from: '#4A1A55',
+    particleColors: ['#FF5CAD', '#B66BFF', '#FFFFFF'],
+    particleCount: 14,
+    shake: false,
+  },
+  Exclusive: {
+    label: 'Exclusive',
+    color: '#FFC94D',
+    glow: 'rgba(255, 201, 77, 0.65)',
+    from: '#5A3A0A',
+    particleColors: ['#FFC94D', '#FF4655', '#FFE8A3'],
+    particleCount: 30,
+    shake: true,
+  },
+  Ultra: {
+    label: 'Ultra',
+    color: '#FFD54A',
+    glow: 'rgba(255, 70, 85, 0.7)',
+    from: '#5E1620',
+    particleColors: ['#FFD54A', '#FF4655', '#FFFFFF'],
+    particleCount: 36,
+    shake: true,
+  },
 };
 
 /** 발로란트 UI 특유의 모서리 컷 (버튼/패널용) */
