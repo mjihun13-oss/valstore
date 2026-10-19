@@ -1,271 +1,361 @@
-import { useMemo, useState } from 'react';
-import type { FormEvent } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
-import { Coins, KeyRound, Loader2, LogIn, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { AnimatePresence } from 'framer-motion';
+import { Browser } from '@capacitor/browser';
+import { ClipboardPaste, Coins, ExternalLink, Loader2, LogIn, LogOut, RefreshCw } from 'lucide-react';
 import ShopGrid from './components/ShopGrid';
+import SkinDetail from './components/SkinDetail';
 import VpGuideModal from './components/VpGuideModal';
+import {
+  AuthExpiredError,
+  REGIONS,
+  RIOT_LOGIN_URL,
+  fetchMyShop,
+  parseAccessToken,
+} from './services/riotStore';
+import type { Region } from './services/riotStore';
+import { LoginCancelledError, riotWebLogin } from './services/riotLogin';
 import { NOTCH_CLIP } from './types/valorant';
-import type { ValorantSkin } from './types/valorant';
+import type { DailyShop } from './types/valorant';
+import {
+  clearSession,
+  clearToken,
+  loadRegion,
+  loadRevealed,
+  loadSnapshot,
+  loadToken,
+  saveRegion,
+  saveRevealed,
+  saveSnapshot,
+  saveToken,
+} from './utils/storage';
 import { calculateVpRecommendations, formatVp } from './utils/vpCalculator';
 
-/* ---------- Mock 데이터 ---------- */
+type Phase = 'boot' | 'login' | 'shop';
 
-const makeArt = (c1: string, c2: string): string => {
-  const svg =
-    `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 300 200'>` +
-    `<defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'>` +
-    `<stop offset='0' stop-color='${c1}'/><stop offset='1' stop-color='${c2}'/></linearGradient></defs>` +
-    `<polygon points='20,110 90,85 210,85 235,70 280,70 280,95 240,100 225,125 150,125 135,170 100,170 105,125 20,130' ` +
-    `fill='url(#g)' stroke='white' stroke-opacity='.6' stroke-width='3'/></svg>`;
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
-};
+const pad = (n: number): string => String(n).padStart(2, '0');
+const formatCountdown = (s: number): string =>
+  `${pad(Math.floor(s / 3600))}:${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)}`;
 
-/** 테스트용 데이터 (가격/티어는 예시) */
-const MOCK_SKINS: ValorantSkin[] = [
-  { id: 'mock-ion-sheriff', name: 'Ion Sheriff', weapon: 'Sheriff', price: 875, tier: 'Select', imageUrl: makeArt('#00C2FF', '#0B3A52') },
-  { id: 'mock-neon-marshal', name: 'Neon Marshal', weapon: 'Marshal', price: 1275, tier: 'Deluxe', imageUrl: makeArt('#2BFFA0', '#0B4A38') },
-  { id: 'mock-reaver-vandal', name: 'Reaver Vandal', weapon: 'Vandal', price: 1775, tier: 'Premium', imageUrl: makeArt('#FF5CAD', '#4A1A55') },
-  { id: 'mock-oni-phantom', name: 'Oni Phantom', weapon: 'Phantom', price: 2175, tier: 'Exclusive', imageUrl: makeArt('#FFC94D', '#8A1F2B') },
-];
-
-/* ---------- 상점 불러오기 ---------- */
-
-/** 앱(APK)에는 서버가 없으므로 상점 프록시의 절대 주소를 .env 의 VITE_API_BASE 로 지정한다. */
-const API_BASE: string = (import.meta.env.VITE_API_BASE as string | undefined) ?? '';
-
-interface LoginPayload {
-  mode: 'password' | 'token';
-  username?: string;
-  password?: string;
-  token?: string;
+function useCountdown(shop: DailyShop | null): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!shop) return;
+    const t = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(t);
+  }, [shop]);
+  if (!shop) return 0;
+  return Math.max(0, Math.floor((shop.fetchedAt + shop.remainingSeconds * 1000 - now) / 1000));
 }
 
-/**
- * 브라우저에서 Riot 인증 API를 직접 호출할 수 없으므로(CORS, 약관),
- * 사용자가 직접 운영하는 백엔드 프록시를 호출하는 구조입니다.
- * 응답 형식: { skins: ValorantSkin[4] }
- */
-async function fetchStorefront(payload: LoginPayload): Promise<ValorantSkin[]> {
-  if (!API_BASE) {
-    throw new Error('서버 주소(VITE_API_BASE)가 설정되지 않았어요. Mock 데이터를 사용해 주세요.');
-  }
-  const res = await fetch(`${API_BASE}/api/valorant/storefront`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) throw new Error(`상점 서버 응답 오류 (${res.status})`);
-  const data = (await res.json()) as { skins?: ValorantSkin[] };
-  if (!Array.isArray(data.skins) || data.skins.length !== 4) {
-    throw new Error('상점 데이터 형식이 올바르지 않아요. 스킨 4개가 필요해요.');
-  }
-  return data.skins;
+/* ---------- 로그인 화면 ---------- */
+
+interface LoginScreenProps {
+  region: Region;
+  onRegion: (r: Region) => void;
+  busy: boolean;
+  error: string | null;
+  onWebLogin: () => void;
+  onSubmit: (pasted: string) => void;
 }
 
-/* ---------- 로그인 모달 ---------- */
+function LoginScreen({ region, onRegion, busy, error, onWebLogin, onSubmit }: LoginScreenProps) {
+  const [pasted, setPasted] = useState('');
 
-interface LoginModalProps {
-  open: boolean;
-  onClose: () => void;
-  onLoaded: (skins: ValorantSkin[]) => void;
-}
-
-function LoginModal({ open, onClose, onLoaded }: LoginModalProps) {
-  const [useMock, setUseMock] = useState(true);
-  const [mode, setMode] = useState<'password' | 'token'>('password');
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [token, setToken] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    if (useMock) {
-      onLoaded(MOCK_SKINS);
-      onClose();
-      return;
-    }
-    setLoading(true);
-    try {
-      const skins = await fetchStorefront(
-        mode === 'password' ? { mode, username, password } : { mode, token },
-      );
-      setPassword('');
-      setToken('');
-      onLoaded(skins);
-      onClose();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '상점을 불러오지 못했어요.');
-    } finally {
-      setLoading(false);
-    }
+  const openExternal = () => {
+    Browser.open({ url: RIOT_LOGIN_URL }).catch(() => {
+      window.open(RIOT_LOGIN_URL, '_blank');
+    });
+  };
+  const paste = () => {
+    navigator.clipboard
+      .readText()
+      .then(setPasted)
+      .catch(() => undefined);
   };
 
-  const inputClass =
-    'h-11 w-full bg-[#1B2733] px-3 text-sm text-[#ECE8E1] outline-none ring-1 ring-white/10 focus:ring-[#FF4655] disabled:opacity-40';
-
   return (
-    <AnimatePresence>
-      {open && (
-        <motion.div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 sm:items-center"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          onClick={onClose}
-        >
-          <motion.form
-            role="dialog"
-            aria-modal="true"
-            aria-label="계정 연결"
-            onSubmit={submit}
-            onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-md space-y-4 bg-[#0F1923] p-5 text-[#ECE8E1]"
-            initial={{ y: 60, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: 60, opacity: 0 }}
-          >
-            <div className="flex items-center justify-between">
-              <h2 className="flex items-center gap-2 text-lg font-black">
-                <KeyRound size={20} color="#FF4655" />
-                계정 연결
-              </h2>
-              <button type="button" onClick={onClose} aria-label="닫기" className="p-1 text-[#ECE8E1]/70 hover:text-white">
-                <X size={20} />
-              </button>
-            </div>
+    <div className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-6 px-5 py-8">
+      <div>
+        <h1 className="text-2xl font-black tracking-tight">
+          <span className="text-[#FF4655]">VALORANT</span> 오늘의 상점
+        </h1>
+        <p className="mt-2 text-sm text-[#ECE8E1]/70">
+          Riot 공식 로그인 창에서 로그인하면 내 상점이 바로 열려요. 비밀번호는 이 앱에 저장되지 않아요.
+        </p>
+      </div>
 
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={useMock}
-                onChange={(e) => setUseMock(e.target.checked)}
-                className="h-4 w-4 accent-[#FF4655]"
-              />
-              테스트용 Mock 데이터 사용
-            </label>
-
-            <div className="grid grid-cols-2 gap-2">
-              {(['password', 'token'] as const).map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  disabled={useMock}
-                  onClick={() => setMode(m)}
-                  aria-pressed={mode === m}
-                  className={`h-10 text-sm font-bold disabled:opacity-40 ${
-                    mode === m ? 'bg-[#ECE8E1] text-[#0F1923]' : 'bg-[#1B2733] text-[#ECE8E1]/80'
-                  }`}
-                >
-                  {m === 'password' ? 'ID / 비밀번호' : 'Riot Token'}
-                </button>
-              ))}
-            </div>
-
-            {mode === 'password' ? (
-              <div className="space-y-2">
-                <input
-                  className={inputClass}
-                  placeholder="Riot ID"
-                  autoComplete="username"
-                  value={username}
-                  disabled={useMock}
-                  onChange={(e) => setUsername(e.target.value)}
-                />
-                <input
-                  className={inputClass}
-                  type="password"
-                  placeholder="비밀번호"
-                  autoComplete="current-password"
-                  value={password}
-                  disabled={useMock}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-              </div>
-            ) : (
-              <input
-                className={inputClass}
-                placeholder="Access Token"
-                autoComplete="off"
-                value={token}
-                disabled={useMock}
-                onChange={(e) => setToken(e.target.value)}
-              />
-            )}
-
-            {error && <p className="text-sm text-[#FF4655]">{error}</p>}
-
+      <div>
+        <p className="mb-2 text-sm font-bold">지역</p>
+        <div className="grid grid-cols-4 gap-2">
+          {REGIONS.map((r) => (
             <button
-              type="submit"
-              disabled={loading}
-              className="flex h-12 w-full items-center justify-center gap-2 bg-[#FF4655] font-bold text-white hover:bg-[#ff5f6c] disabled:opacity-60"
-              style={{ clipPath: NOTCH_CLIP }}
+              key={r.id}
+              type="button"
+              aria-pressed={region === r.id}
+              onClick={() => onRegion(r.id)}
+              className={`h-10 text-sm font-bold ${
+                region === r.id ? 'bg-[#ECE8E1] text-[#0F1923]' : 'bg-[#1B2733] text-[#ECE8E1]/80'
+              }`}
             >
-              {loading ? <Loader2 size={18} className="animate-spin" /> : <LogIn size={18} />}
-              {useMock ? '테스트 상점 불러오기' : '상점 불러오기'}
+              {r.label}
             </button>
-          </motion.form>
-        </motion.div>
-      )}
-    </AnimatePresence>
+          ))}
+        </div>
+      </div>
+
+      <button
+        type="button"
+        disabled={busy}
+        onClick={onWebLogin}
+        className="flex h-14 w-full items-center justify-center gap-2 bg-[#FF4655] text-lg font-bold text-white hover:bg-[#ff5f6c] disabled:opacity-60"
+        style={{ clipPath: NOTCH_CLIP }}
+      >
+        {busy ? <Loader2 size={20} className="animate-spin" /> : <LogIn size={20} />}
+        Riot 계정으로 로그인
+      </button>
+
+      {error && <p className="text-sm text-[#FF4655]">{error}</p>}
+
+      <details className="text-sm text-[#ECE8E1]/70">
+        <summary className="cursor-pointer select-none">로그인 창이 안 열리면 주소로 로그인</summary>
+        <div className="mt-3 space-y-2">
+          <button
+            type="button"
+            onClick={openExternal}
+            className="flex h-10 w-full items-center justify-center gap-2 bg-[#1B2733] text-xs font-bold hover:bg-[#223244]"
+          >
+            <ExternalLink size={14} />
+            브라우저에서 Riot 로그인 열기
+          </button>
+          <p className="text-xs leading-relaxed text-[#ECE8E1]/60">
+            로그인 후 열린 playvalorant.com 페이지의 주소 전체를 복사해서 붙여넣으세요.
+          </p>
+          <textarea
+            value={pasted}
+            onChange={(e) => setPasted(e.target.value)}
+            rows={3}
+            placeholder="https://playvalorant.com/opt_in#access_token=…"
+            className="w-full resize-none bg-[#1B2733] p-3 text-xs text-[#ECE8E1] outline-none ring-1 ring-white/10 focus:ring-[#FF4655]"
+          />
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={paste}
+              className="flex h-9 flex-1 items-center justify-center gap-1.5 bg-[#1B2733] text-xs font-bold hover:bg-[#223244]"
+            >
+              <ClipboardPaste size={14} />
+              붙여넣기
+            </button>
+            <button
+              type="button"
+              disabled={busy || pasted.trim() === ''}
+              onClick={() => onSubmit(pasted)}
+              className="h-9 flex-1 bg-[#ECE8E1] text-xs font-bold text-[#0F1923] disabled:opacity-40"
+            >
+              불러오기
+            </button>
+          </div>
+        </div>
+      </details>
+    </div>
   );
 }
 
 /* ---------- 메인 ---------- */
 
 export default function App() {
-  const [skins, setSkins] = useState<ValorantSkin[]>(MOCK_SKINS);
-  const [shopKey, setShopKey] = useState(0);
+  const [phase, setPhase] = useState<Phase>('boot');
+  const [shop, setShop] = useState<DailyShop | null>(null);
+  const [region, setRegion] = useState<Region>(() => loadRegion());
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [revealed, setRevealed] = useState<Set<string>>(() => loadRevealed());
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [ownedInput, setOwnedInput] = useState('0');
+  const [detailId, setDetailId] = useState<string | null>(null);
   const [guideOpen, setGuideOpen] = useState(false);
-  const [loginOpen, setLoginOpen] = useState(false);
+  const remaining = useCountdown(shop);
 
-  const ownedVp = Number(ownedInput) || 0;
+  const applyShop = useCallback((next: DailyShop) => {
+    setShop(next);
+    setOwnedInput(String(next.vp ?? 0));
+    setSelectedIds([]);
+    setPhase('shop');
+  }, []);
 
-  const totalVp = useMemo(
-    () => skins.filter((s) => selectedIds.includes(s.id)).reduce((sum, s) => sum + s.price, 0),
-    [skins, selectedIds],
+  const loadWith = useCallback(
+    async (token: string, reg: Region, expiresAt: number): Promise<boolean> => {
+      setBusy(true);
+      setError(null);
+      try {
+        const next = await fetchMyShop(token, reg);
+        saveToken({ token, expiresAt, region: reg });
+        saveSnapshot(next);
+        applyShop(next);
+        return true;
+      } catch (e) {
+        if (e instanceof AuthExpiredError) clearToken();
+        setError(e instanceof Error ? e.message : '상점을 불러오지 못했어요.');
+        return false;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [applyShop],
   );
 
-  const recommendations = useMemo(
-    () => calculateVpRecommendations(totalVp, ownedVp),
-    [totalVp, ownedVp],
-  );
+  // 앱을 켜면: 로그인이 살아 있으면 새로 불러오고, 아니면 마지막 상점을 보여준다.
+  useEffect(() => {
+    const saved = loadToken();
+    const snap = loadSnapshot();
+    if (saved && saved.expiresAt > Date.now()) {
+      void loadWith(saved.token, saved.region, saved.expiresAt).then((ok) => {
+        if (ok) return;
+        if (snap) applyShop(snap);
+        else setPhase('login');
+      });
+      return;
+    }
+    if (snap) applyShop(snap);
+    else setPhase('login');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleSubmit = (pasted: string) => {
+    const parsed = parseAccessToken(pasted);
+    if (!parsed) {
+      setError('붙여넣은 내용에서 로그인 정보를 찾지 못했어요. 주소 전체를 복사했는지 확인해 주세요.');
+      return;
+    }
+    saveRegion(region);
+    void loadWith(parsed.token, region, parsed.expiresAt);
+  };
+
+  const handleWebLogin = async () => {
+    setError(null);
+    setBusy(true);
+    try {
+      const url = await riotWebLogin();
+      setBusy(false);
+      handleSubmit(url);
+    } catch (e) {
+      setBusy(false);
+      if (e instanceof LoginCancelledError) return;
+      setError(
+        e instanceof Error
+          ? `${e.message} 아래 "주소로 로그인"을 이용해 주세요.`
+          : '로그인에 실패했어요. 아래 "주소로 로그인"을 이용해 주세요.',
+      );
+    }
+  };
+
+  const handleRefresh = () => {
+    const saved = loadToken();
+    if (saved && saved.expiresAt > Date.now()) {
+      void loadWith(saved.token, saved.region, saved.expiresAt);
+    } else {
+      setShop(null);
+      setError('로그인이 만료됐어요. 다시 로그인해 주세요.');
+      setPhase('login');
+    }
+  };
+
+  const handleLogout = () => {
+    clearSession();
+    setShop(null);
+    setError(null);
+    setPhase('login');
+  };
+
+  const markRevealed = (id: string) => {
+    setRevealed((prev) => {
+      if (prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.add(id);
+      saveRevealed(next);
+      return next;
+    });
+  };
 
   const toggleSelect = (id: string) =>
     setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
-  const handleLoaded = (next: ValorantSkin[]) => {
-    setSkins(next);
-    setSelectedIds([]);
-    setShopKey((k) => k + 1);
-  };
+  const ownedVp = Number(ownedInput) || 0;
+  const skins = shop?.skins ?? [];
+  const totalVp = useMemo(
+    () => skins.filter((s) => selectedIds.includes(s.id)).reduce((sum, s) => sum + s.price, 0),
+    [skins, selectedIds],
+  );
+  const recommendations = useMemo(
+    () => calculateVpRecommendations(totalVp, ownedVp),
+    [totalVp, ownedVp],
+  );
+  const detailSkin = skins.find((s) => s.id === detailId) ?? null;
+
+  if (phase === 'boot') {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#0F1923] text-[#ECE8E1]">
+        <Loader2 className="animate-spin" color="#FF4655" />
+      </div>
+    );
+  }
+
+  if (phase === 'login' || !shop) {
+    return (
+      <div className="min-h-screen bg-[#0F1923] text-[#ECE8E1]">
+        <LoginScreen
+          region={region}
+          onRegion={setRegion}
+          busy={busy}
+          error={error}
+          onWebLogin={handleWebLogin}
+          onSubmit={handleSubmit}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#0F1923] text-[#ECE8E1]">
       <header className="flex items-center justify-between border-b border-white/10 px-4 py-3">
-        <h1 className="text-lg font-black tracking-tight">
-          <span className="text-[#FF4655]">VALORANT</span> 오늘의 상점
-        </h1>
-        <button
-          type="button"
-          onClick={() => setLoginOpen(true)}
-          className="flex h-9 items-center gap-1.5 bg-[#1B2733] px-3 text-sm font-bold hover:bg-[#223244]"
-        >
-          <KeyRound size={15} />
-          계정 연결
-        </button>
+        <div>
+          <h1 className="text-lg font-black tracking-tight">내 오늘의 상점</h1>
+          <p className="text-xs text-[#ECE8E1]/60">
+            {remaining > 0 ? `갱신까지 ${formatCountdown(remaining)}` : '상점이 갱신됐어요'}
+          </p>
+        </div>
+        <div className="flex gap-1">
+          <button
+            type="button"
+            onClick={handleRefresh}
+            disabled={busy}
+            aria-label="상점 새로 불러오기"
+            className="p-2 hover:text-white disabled:opacity-50"
+          >
+            <RefreshCw size={20} className={busy ? 'animate-spin' : ''} />
+          </button>
+          <button type="button" onClick={handleLogout} aria-label="로그아웃" className="p-2 hover:text-white">
+            <LogOut size={20} />
+          </button>
+        </div>
       </header>
 
-      <main className="mx-auto max-w-5xl space-y-6 px-4 py-6">
+      <main className="mx-auto max-w-5xl space-y-5 px-4 py-5">
+        {remaining === 0 && (
+          <div className="flex items-center justify-between bg-[#1B2733] p-3 text-sm">
+            <span>새 상점이 열렸어요.</span>
+            <button type="button" onClick={handleRefresh} className="font-bold text-[#FF4655]">
+              다시 불러오기
+            </button>
+          </div>
+        )}
+        {error && <p className="text-sm text-[#FF4655]">{error}</p>}
+
         <ShopGrid
-          key={shopKey}
           skins={skins}
+          revealedIds={revealed}
           selectedIds={selectedIds}
-          onToggleSelect={toggleSelect}
+          onOpen={setDetailId}
         />
 
         <section
@@ -275,7 +365,7 @@ export default function App() {
           <div className="grid grid-cols-3 gap-3">
             <div>
               <label htmlFor="owned-vp" className="text-[11px] text-[#ECE8E1]/60">
-                보유 VP
+                보유 VP{shop.vp !== null ? ' (자동)' : ''}
               </label>
               <input
                 id="owned-vp"
@@ -287,7 +377,7 @@ export default function App() {
               />
             </div>
             <div>
-              <p className="text-[11px] text-[#ECE8E1]/60">선택한 스킨 {selectedIds.length}개</p>
+              <p className="text-[11px] text-[#ECE8E1]/60">담은 스킨 {selectedIds.length}개</p>
               <p className="mt-1 flex h-11 items-center text-sm font-bold">{formatVp(totalVp)}</p>
             </div>
             <div>
@@ -302,21 +392,35 @@ export default function App() {
             type="button"
             disabled={selectedIds.length === 0}
             onClick={() => setGuideOpen(true)}
-            className="flex h-12 items-center justify-center gap-2 bg-[#FF4655] px-5 font-bold text-white transition-colors hover:bg-[#ff5f6c] disabled:cursor-not-allowed disabled:opacity-40"
+            className="flex h-12 items-center justify-center gap-2 bg-[#FF4655] px-5 font-bold text-white hover:bg-[#ff5f6c] disabled:cursor-not-allowed disabled:opacity-40"
             style={{ clipPath: NOTCH_CLIP }}
           >
             <Coins size={18} />
-            VP 구매 가이드
+            담은 스킨 VP 가이드
           </button>
         </section>
       </main>
+
+      <AnimatePresence>
+        {detailSkin && (
+          <SkinDetail
+            key={detailSkin.id}
+            skin={detailSkin}
+            revealed={revealed.has(detailSkin.id)}
+            onReveal={() => markRevealed(detailSkin.id)}
+            onClose={() => setDetailId(null)}
+            selected={selectedIds.includes(detailSkin.id)}
+            onToggleSelect={() => toggleSelect(detailSkin.id)}
+            ownedVp={ownedVp}
+          />
+        )}
+      </AnimatePresence>
 
       <VpGuideModal
         open={guideOpen}
         onClose={() => setGuideOpen(false)}
         recommendations={recommendations}
       />
-      <LoginModal open={loginOpen} onClose={() => setLoginOpen(false)} onLoaded={handleLoaded} />
     </div>
   );
 }
