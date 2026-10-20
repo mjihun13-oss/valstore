@@ -17,10 +17,10 @@ export const RIOT_LOGIN_URL =
 const VP_CURRENCY_ID = '85ad13f7-3d1b-5128-9eb2-7cd8ee0b5741';
 const CLIENT_PLATFORM = btoa(
   JSON.stringify({
-    platform: 'PC',
-    systemOS: 'Windows',
-    systemOSVersion: '10.0.19042.1.256.64bit',
-    systemChipset: 'Unknown',
+    platformType: 'PC',
+    platformOS: 'Windows',
+    platformOSVersion: '10.0.19042.1.256.64bit',
+    platformChipset: 'Unknown',
   }),
 );
 
