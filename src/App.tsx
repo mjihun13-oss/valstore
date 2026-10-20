@@ -14,6 +14,7 @@ import {
 } from './services/riotStore';
 import type { Region } from './services/riotStore';
 import { LoginCancelledError, riotWebLogin } from './services/riotLogin';
+import { MfaRequiredError, riotPasswordLogin, riotSubmitMfa } from './services/riotPasswordLogin';
 import { NOTCH_CLIP } from './types/valorant';
 import type { DailyShop } from './types/valorant';
 import {
@@ -54,12 +55,31 @@ interface LoginScreenProps {
   onRegion: (r: Region) => void;
   busy: boolean;
   error: string | null;
+  mfaEmail: string | null;
   onWebLogin: () => void;
+  onPasswordLogin: (username: string, password: string) => void;
+  onMfa: (code: string) => void;
   onSubmit: (pasted: string) => void;
 }
 
-function LoginScreen({ region, onRegion, busy, error, onWebLogin, onSubmit }: LoginScreenProps) {
+const fieldClass =
+  'h-11 w-full bg-[#1B2733] px-3 text-sm text-[#ECE8E1] outline-none ring-1 ring-white/10 focus:ring-[#FF4655]';
+
+function LoginScreen({
+  region,
+  onRegion,
+  busy,
+  error,
+  mfaEmail,
+  onWebLogin,
+  onPasswordLogin,
+  onMfa,
+  onSubmit,
+}: LoginScreenProps) {
   const [pasted, setPasted] = useState('');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [code, setCode] = useState('');
 
   const openExternal = () => {
     Browser.open({ url: RIOT_LOGIN_URL }).catch(() => {
@@ -80,7 +100,7 @@ function LoginScreen({ region, onRegion, busy, error, onWebLogin, onSubmit }: Lo
           <span className="text-[#FF4655]">VALORANT</span> 오늘의 상점
         </h1>
         <p className="mt-2 text-sm text-[#ECE8E1]/70">
-          Riot 공식 로그인 창에서 로그인하면 내 상점이 바로 열려요. 비밀번호는 이 앱에 저장되지 않아요.
+          로그인하면 내 상점이 바로 열려요. 비밀번호는 이 앱에 저장되지 않아요.
         </p>
       </div>
 
@@ -114,10 +134,72 @@ function LoginScreen({ region, onRegion, busy, error, onWebLogin, onSubmit }: Lo
         Riot 계정으로 로그인
       </button>
 
-      {error && <p className="text-sm text-[#FF4655]">{error}</p>}
+      {error && <p className="break-words text-sm text-[#FF4655]">{error}</p>}
+
+      <details className="text-sm text-[#ECE8E1]/70" open={mfaEmail !== null}>
+        <summary className="cursor-pointer select-none">아이디/비밀번호로 로그인 (앱 전용)</summary>
+        <div className="mt-3 space-y-2">
+          {mfaEmail === null ? (
+            <>
+              <input
+                className={fieldClass}
+                placeholder="Riot 아이디"
+                autoComplete="off"
+                autoCapitalize="none"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+              />
+              <input
+                className={fieldClass}
+                type="password"
+                placeholder="비밀번호"
+                autoComplete="off"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+              <button
+                type="button"
+                disabled={busy || username === '' || password === ''}
+                onClick={() => {
+                  onPasswordLogin(username.trim(), password);
+                  setPassword('');
+                }}
+                className="h-11 w-full bg-[#ECE8E1] text-sm font-bold text-[#0F1923] disabled:opacity-40"
+              >
+                로그인
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="text-xs">
+                {mfaEmail} 로 보낸 인증 코드를 입력해 주세요.
+              </p>
+              <input
+                className={fieldClass}
+                inputMode="numeric"
+                placeholder="인증 코드 6자리"
+                autoComplete="one-time-code"
+                value={code}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              />
+              <button
+                type="button"
+                disabled={busy || code.length < 6}
+                onClick={() => onMfa(code)}
+                className="h-11 w-full bg-[#ECE8E1] text-sm font-bold text-[#0F1923] disabled:opacity-40"
+              >
+                인증하기
+              </button>
+            </>
+          )}
+          <p className="text-[11px] leading-relaxed text-[#ECE8E1]/50">
+            비공식 방식이라 Riot이 막으면 안 될 수 있어요. 그땐 위의 Riot 계정 로그인을 쓰세요.
+          </p>
+        </div>
+      </details>
 
       <details className="text-sm text-[#ECE8E1]/70">
-        <summary className="cursor-pointer select-none">로그인 창이 안 열리면 주소로 로그인</summary>
+        <summary className="cursor-pointer select-none">주소를 붙여넣어 로그인</summary>
         <div className="mt-3 space-y-2">
           <button
             type="button"
@@ -174,6 +256,7 @@ export default function App() {
   const [ownedInput, setOwnedInput] = useState('0');
   const [detailId, setDetailId] = useState<string | null>(null);
   const [guideOpen, setGuideOpen] = useState(false);
+  const [mfaEmail, setMfaEmail] = useState<string | null>(null);
   const remaining = useCountdown(shop);
 
   const applyShop = useCallback((next: DailyShop) => {
@@ -249,6 +332,24 @@ export default function App() {
     }
   };
 
+  const finishPassword = async (run: () => Promise<string>) => {
+    setError(null);
+    setBusy(true);
+    try {
+      const url = await run();
+      setBusy(false);
+      setMfaEmail(null);
+      handleSubmit(url);
+    } catch (e) {
+      setBusy(false);
+      if (e instanceof MfaRequiredError) {
+        setMfaEmail(e.email || '등록된 이메일');
+        return;
+      }
+      setError(e instanceof Error ? e.message : '로그인에 실패했어요.');
+    }
+  };
+
   const handleRefresh = () => {
     const saved = loadToken();
     if (saved && saved.expiresAt > Date.now()) {
@@ -308,7 +409,10 @@ export default function App() {
           onRegion={setRegion}
           busy={busy}
           error={error}
+          mfaEmail={mfaEmail}
           onWebLogin={handleWebLogin}
+          onPasswordLogin={(u, p) => void finishPassword(() => riotPasswordLogin(u, p))}
+          onMfa={(c) => void finishPassword(() => riotSubmitMfa(c))}
           onSubmit={handleSubmit}
         />
       </div>

@@ -1,3 +1,4 @@
+import { Capacitor } from '@capacitor/core';
 import type { DailyShop, SkinChroma, SkinTier, ValorantSkin } from '../types/valorant';
 
 export type Region = 'kr' | 'ap' | 'na' | 'eu';
@@ -45,12 +46,38 @@ export function parseAccessToken(input: string): ParsedToken | null {
   return { token, expiresAt: Date.now() + Math.max(60, ttl - 60) * 1000 };
 }
 
-async function http<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, init);
-  if (res.status === 401 || res.status === 403) {
-    throw new AuthExpiredError('로그인이 만료됐거나 권한이 없어요. 다시 로그인해 주세요.');
+/** 웹(브라우저)에서는 Riot 서버가 CORS를 막으므로 직접 만든 프록시를 거친다. 앱(APK)은 필요 없다. */
+const PROXY_URL = ((import.meta.env.VITE_PROXY_URL as string | undefined) ?? '').replace(/\/$/, '');
+
+function routed(url: string): string {
+  if (!PROXY_URL || Capacitor.isNativePlatform()) return url;
+  const host = new URL(url).hostname;
+  if (host.endsWith('valorant-api.com')) return url;
+  return `${PROXY_URL}/?url=${encodeURIComponent(url)}`;
+}
+
+/** label 은 오류가 어느 단계에서 났는지 화면에 보여주기 위한 이름이다. */
+async function http<T>(label: string, url: string, init?: RequestInit): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(routed(url), init);
+  } catch {
+    throw new Error(`${label}: 네트워크에 연결하지 못했어요.`);
   }
-  if (!res.ok) throw new Error(`요청에 실패했어요 (${res.status})`);
+  if (res.status === 401 || res.status === 403) {
+    throw new AuthExpiredError(
+      `${label}: 로그인이 만료됐거나 권한이 없어요 (${res.status}). 다시 로그인해 주세요.`,
+    );
+  }
+  if (!res.ok) {
+    let detail = '';
+    try {
+      detail = (await res.text()).slice(0, 120);
+    } catch {
+      /* 무시 */
+    }
+    throw new Error(`${label} 실패 (${res.status})${detail ? ` ${detail}` : ''}`);
+  }
   return (await res.json()) as T;
 }
 
@@ -90,15 +117,24 @@ async function loadStorefront(
   puuid: string,
   headers: Record<string, string>,
 ): Promise<RawStorefront> {
+  let v3Error = '';
   try {
-    return await http<RawStorefront>(`${base}/store/v3/storefront/${puuid}`, {
+    return await http<RawStorefront>('상점 조회(v3)', `${base}/store/v3/storefront/${puuid}`, {
       method: 'POST',
       headers: { ...headers, 'Content-Type': 'application/json' },
       body: '{}',
     });
   } catch (e) {
     if (e instanceof AuthExpiredError) throw e;
-    return http<RawStorefront>(`${base}/store/v2/storefront/${puuid}`, { headers });
+    v3Error = e instanceof Error ? e.message : String(e);
+  }
+  try {
+    return await http<RawStorefront>('상점 조회(v2)', `${base}/store/v2/storefront/${puuid}`, {
+      headers,
+    });
+  } catch (e) {
+    if (e instanceof AuthExpiredError) throw e;
+    throw new Error(`${v3Error} / ${e instanceof Error ? e.message : String(e)}`);
   }
 }
 
@@ -108,7 +144,7 @@ async function loadWallet(
   headers: Record<string, string>,
 ): Promise<number | null> {
   try {
-    const w = await http<{ Balances: Record<string, number> }>(`${base}/store/v1/wallet/${puuid}`, {
+    const w = await http<{ Balances: Record<string, number> }>('지갑 조회', `${base}/store/v1/wallet/${puuid}`, {
       headers,
     });
     return w.Balances[VP_CURRENCY_ID] ?? 0;
@@ -126,13 +162,13 @@ export async function fetchMyShop(accessToken: string, region: Region): Promise<
   const bearer = { Authorization: `Bearer ${accessToken}` };
 
   const [ent, user, ver] = await Promise.all([
-    http<{ entitlements_token: string }>('https://entitlements.auth.riotgames.com/api/token/v1', {
+    http<{ entitlements_token: string }>('인증 토큰 발급', 'https://entitlements.auth.riotgames.com/api/token/v1', {
       method: 'POST',
       headers: { ...bearer, 'Content-Type': 'application/json' },
       body: '{}',
     }),
-    http<{ sub: string }>('https://auth.riotgames.com/userinfo', { headers: bearer }),
-    http<{ data: { riotClientVersion: string } }>('https://valorant-api.com/v1/version'),
+    http<{ sub: string }>('내 정보 조회', 'https://auth.riotgames.com/userinfo', { headers: bearer }),
+    http<{ data: { riotClientVersion: string } }>('게임 버전 조회', 'https://valorant-api.com/v1/version'),
   ]);
 
   const headers: Record<string, string> = {
@@ -146,8 +182,8 @@ export async function fetchMyShop(accessToken: string, region: Region): Promise<
   const [store, vp, weapons, tiers] = await Promise.all([
     loadStorefront(base, user.sub, headers),
     loadWallet(base, user.sub, headers),
-    http<{ data: RawWeapon[] }>('https://valorant-api.com/v1/weapons?language=ko-KR'),
-    http<{ data: { uuid: string; devName: string }[] }>('https://valorant-api.com/v1/contenttiers'),
+    http<{ data: RawWeapon[] }>('스킨 정보 조회', 'https://valorant-api.com/v1/weapons?language=ko-KR'),
+    http<{ data: { uuid: string; devName: string }[] }>('티어 정보 조회', 'https://valorant-api.com/v1/contenttiers'),
   ]);
 
   const layout = store.SkinsPanelLayout;
