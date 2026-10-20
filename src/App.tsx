@@ -1,10 +1,28 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { Browser } from '@capacitor/browser';
-import { ClipboardPaste, Coins, ExternalLink, Loader2, LogIn, LogOut, RefreshCw } from 'lucide-react';
+import {
+  ClipboardPaste,
+  Coins,
+  ExternalLink,
+  Heart,
+  Loader2,
+  LogIn,
+  LogOut,
+  RefreshCw,
+} from 'lucide-react';
+import BundlesView from './components/BundlesView';
+import CollectionView from './components/CollectionView';
+import ProfileBar from './components/ProfileBar';
 import ShopGrid from './components/ShopGrid';
 import SkinDetail from './components/SkinDetail';
+import TabBar from './components/TabBar';
+import type { Tab } from './components/TabBar';
 import VpGuideModal from './components/VpGuideModal';
+import WishlistView from './components/WishlistView';
+import { notifyWishlist } from './services/notify';
+import { LoginCancelledError, riotWebLogin } from './services/riotLogin';
+import { MfaRequiredError, riotPasswordLogin, riotSubmitMfa } from './services/riotPasswordLogin';
 import {
   AuthExpiredError,
   REGIONS,
@@ -13,39 +31,44 @@ import {
   parseAccessToken,
 } from './services/riotStore';
 import type { Region } from './services/riotStore';
-import { LoginCancelledError, riotWebLogin } from './services/riotLogin';
-import { MfaRequiredError, riotPasswordLogin, riotSubmitMfa } from './services/riotPasswordLogin';
 import { NOTCH_CLIP } from './types/valorant';
-import type { DailyShop } from './types/valorant';
+import type { CatalogSkin, DailyShop, ValorantSkin } from './types/valorant';
+import { shareBadges } from './utils/shareCard';
+import type { BadgeShareItem, ShareResult } from './utils/shareCard';
 import {
   clearSession,
   clearToken,
+  loadCatalog,
+  loadNotified,
   loadRegion,
   loadRevealed,
   loadSnapshot,
+  loadStats,
   loadToken,
+  loadWishlist,
+  saveCatalog,
+  saveNotified,
   saveRegion,
   saveRevealed,
   saveSnapshot,
+  saveStats,
   saveToken,
+  saveWishlist,
 } from './utils/storage';
+import type { UserStats } from './utils/storage';
+import { formatCountdown, secondsLeft } from './utils/time';
 import { calculateVpRecommendations, formatVp } from './utils/vpCalculator';
 
 type Phase = 'boot' | 'login' | 'shop';
 
-const pad = (n: number): string => String(n).padStart(2, '0');
-const formatCountdown = (s: number): string =>
-  `${pad(Math.floor(s / 3600))}:${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)}`;
-
-function useCountdown(shop: DailyShop | null): number {
+function useNow(active: boolean): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    if (!shop) return;
+    if (!active) return;
     const t = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(t);
-  }, [shop]);
-  if (!shop) return 0;
-  return Math.max(0, Math.floor((shop.fetchedAt + shop.remainingSeconds * 1000 - now) / 1000));
+  }, [active]);
+  return now;
 }
 
 /* ---------- 로그인 화면 ---------- */
@@ -245,6 +268,14 @@ function LoginScreen({
 
 /* ---------- 메인 ---------- */
 
+const TAB_TITLES: Record<Tab, string> = {
+  shop: '오늘의 상점',
+  night: '야시장',
+  bundles: '판매 중인 세트',
+  wish: '위시리스트',
+  collection: '내 컬렉션',
+};
+
 export default function App() {
   const [phase, setPhase] = useState<Phase>('boot');
   const [shop, setShop] = useState<DailyShop | null>(null);
@@ -257,23 +288,59 @@ export default function App() {
   const [detailId, setDetailId] = useState<string | null>(null);
   const [guideOpen, setGuideOpen] = useState(false);
   const [mfaEmail, setMfaEmail] = useState<string | null>(null);
-  const remaining = useCountdown(shop);
+  const [tab, setTab] = useState<Tab>('shop');
+  const [wishIds, setWishIds] = useState<string[]>(() => loadWishlist());
+  const [stats, setStats] = useState<UserStats>(() => loadStats());
+  const [catalog, setCatalog] = useState<CatalogSkin[]>(() => loadCatalog());
+  const [wishAlert, setWishAlert] = useState<string[]>([]);
+  const nightCounted = useRef(false);
+  const now = useNow(shop !== null);
 
-  const applyShop = useCallback((next: DailyShop) => {
-    setShop(next);
-    setOwnedInput(String(next.vp ?? 0));
-    setSelectedIds([]);
-    setPhase('shop');
+  const bumpStats = useCallback((fn: (s: UserStats) => UserStats) => {
+    setStats((prev) => {
+      const next = fn(prev);
+      saveStats(next);
+      return next;
+    });
   }, []);
+
+  /** 위시리스트 스킨이 상점/야시장에 있는지 확인하고, 처음 보는 것만 알림을 보낸다. */
+  const checkWishHits = useCallback((next: DailyShop) => {
+    const wish = loadWishlist();
+    const hits = [...next.skins, ...next.night].filter((s) => wish.includes(s.skinId));
+    setWishAlert(hits.map((h) => h.name));
+    const notified = loadNotified();
+    const fresh = hits.filter((h) => !notified.includes(h.id));
+    if (fresh.length > 0) {
+      saveNotified([...notified, ...fresh.map((h) => h.id)]);
+      void notifyWishlist(fresh.map((h) => h.name));
+    }
+  }, []);
+
+  const applyShop = useCallback(
+    (next: DailyShop) => {
+      setShop(next);
+      setOwnedInput(String(next.wallet.vp ?? 0));
+      setSelectedIds([]);
+      nightCounted.current = false;
+      setPhase('shop');
+      checkWishHits(next);
+    },
+    [checkWishHits],
+  );
 
   const loadWith = useCallback(
     async (token: string, reg: Region, expiresAt: number): Promise<boolean> => {
       setBusy(true);
       setError(null);
       try {
-        const next = await fetchMyShop(token, reg);
+        const { shop: next, catalog: cat } = await fetchMyShop(token, reg);
         saveToken({ token, expiresAt, region: reg });
         saveSnapshot(next);
+        if (cat.length > 0) {
+          saveCatalog(cat);
+          setCatalog(cat);
+        }
         applyShop(next);
         return true;
       } catch (e) {
@@ -368,30 +435,65 @@ export default function App() {
     setPhase('login');
   };
 
-  const markRevealed = (id: string) => {
+  const handleTab = (t: Tab) => {
+    setTab(t);
+    if (t === 'night' && shop && shop.night.length > 0 && !nightCounted.current) {
+      nightCounted.current = true;
+      bumpStats((s) => ({ ...s, nightVisits: s.nightVisits + 1 }));
+    }
+  };
+
+  const markRevealed = (skin: ValorantSkin) => {
+    if (revealed.has(skin.id)) return;
     setRevealed((prev) => {
-      if (prev.has(id)) return prev;
       const next = new Set(prev);
-      next.add(id);
+      next.add(skin.id);
       saveRevealed(next);
       return next;
     });
+    const wished = wishIds.includes(skin.skinId);
+    bumpStats((s) => ({
+      ...s,
+      reveals: s.reveals + 1,
+      premiumSeen: s.premiumSeen + (skin.tier === 'Premium' ? 1 : 0),
+      exclusiveSeen: s.exclusiveSeen + (skin.tier === 'Exclusive' ? 1 : 0),
+      ultraSeen: s.ultraSeen + (skin.tier === 'Ultra' ? 1 : 0),
+      wishHits: s.wishHits + (wished ? 1 : 0),
+    }));
   };
 
   const toggleSelect = (id: string) =>
     setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
+  const toggleWish = (skinId: string) => {
+    const adding = !wishIds.includes(skinId);
+    const next = adding ? [...wishIds, skinId] : wishIds.filter((x) => x !== skinId);
+    setWishIds(next);
+    saveWishlist(next);
+    if (adding && shop) {
+      const hit = [...shop.skins, ...shop.night].find((s) => s.skinId === skinId);
+      if (hit) setWishAlert((a) => (a.includes(hit.name) ? a : [...a, hit.name]));
+    }
+  };
+
+  const handleShareBadges = async (ownedCount: number, badges: BadgeShareItem[]): Promise<ShareResult> => {
+    const r = await shareBadges(shop?.riotId ?? 'Riot 계정', ownedCount, badges);
+    if (r === 'shared' || r === 'downloaded') bumpStats((s) => ({ ...s, shares: s.shares + 1 }));
+    return r;
+  };
+
   const ownedVp = Number(ownedInput) || 0;
-  const skins = shop?.skins ?? [];
+  const allSkins = useMemo(() => (shop ? [...shop.skins, ...shop.night] : []), [shop]);
   const totalVp = useMemo(
-    () => skins.filter((s) => selectedIds.includes(s.id)).reduce((sum, s) => sum + s.price, 0),
-    [skins, selectedIds],
+    () => allSkins.filter((s) => selectedIds.includes(s.id)).reduce((sum, s) => sum + s.price, 0),
+    [allSkins, selectedIds],
   );
   const recommendations = useMemo(
     () => calculateVpRecommendations(totalVp, ownedVp),
     [totalVp, ownedVp],
   );
-  const detailSkin = skins.find((s) => s.id === detailId) ?? null;
+  const inShopIds = useMemo(() => new Set(allSkins.map((s) => s.skinId)), [allSkins]);
+  const detailSkin = allSkins.find((s) => s.id === detailId) ?? null;
 
   if (phase === 'boot') {
     return (
@@ -419,91 +521,131 @@ export default function App() {
     );
   }
 
-  return (
-    <div className="min-h-screen bg-[#0F1923] text-[#ECE8E1]">
-      <header className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+  const shopLeft = secondsLeft(shop.fetchedAt, shop.remainingSeconds, now);
+  const nightLeft = secondsLeft(shop.fetchedAt, shop.nightRemainingSeconds, now);
+
+  const vpPanel = (
+    <section
+      aria-label="VP 계산"
+      className="grid gap-4 bg-[#1B2733] p-4 sm:grid-cols-[1fr_auto] sm:items-end"
+    >
+      <div className="grid grid-cols-3 gap-3">
         <div>
-          <h1 className="text-lg font-black tracking-tight">내 오늘의 상점</h1>
-          <p className="text-xs text-[#ECE8E1]/60">
-            {remaining > 0 ? `갱신까지 ${formatCountdown(remaining)}` : '상점이 갱신됐어요'}
+          <label htmlFor="owned-vp" className="text-[11px] text-[#ECE8E1]/60">
+            보유 VP{shop.wallet.vp !== null ? ' (자동)' : ''}
+          </label>
+          <input
+            id="owned-vp"
+            inputMode="numeric"
+            value={ownedInput}
+            onChange={(e) => setOwnedInput(e.target.value.replace(/\D/g, '').slice(0, 7))}
+            onFocus={(e) => e.currentTarget.select()}
+            className="mt-1 h-11 w-full bg-[#0F1923] px-3 text-sm font-bold outline-none ring-1 ring-white/10 focus:ring-[#FF4655]"
+          />
+        </div>
+        <div>
+          <p className="text-[11px] text-[#ECE8E1]/60">담은 스킨 {selectedIds.length}개</p>
+          <p className="mt-1 flex h-11 items-center text-sm font-bold">{formatVp(totalVp)}</p>
+        </div>
+        <div>
+          <p className="text-[11px] text-[#ECE8E1]/60">부족한 VP</p>
+          <p className="mt-1 flex h-11 items-center text-sm font-bold text-[#FF4655]">
+            {formatVp(recommendations.neededVp)}
           </p>
         </div>
-        <div className="flex gap-1">
-          <button
-            type="button"
-            onClick={handleRefresh}
-            disabled={busy}
-            aria-label="상점 새로 불러오기"
-            className="p-2 hover:text-white disabled:opacity-50"
-          >
-            <RefreshCw size={20} className={busy ? 'animate-spin' : ''} />
-          </button>
-          <button type="button" onClick={handleLogout} aria-label="로그아웃" className="p-2 hover:text-white">
-            <LogOut size={20} />
-          </button>
+      </div>
+
+      <button
+        type="button"
+        disabled={selectedIds.length === 0}
+        onClick={() => setGuideOpen(true)}
+        className="flex h-12 items-center justify-center gap-2 bg-[#FF4655] px-5 font-bold text-white hover:bg-[#ff5f6c] disabled:cursor-not-allowed disabled:opacity-40"
+        style={{ clipPath: NOTCH_CLIP }}
+      >
+        <Coins size={18} />
+        담은 스킨 VP 가이드
+      </button>
+    </section>
+  );
+
+  return (
+    <div className="min-h-screen bg-[#0F1923] pb-24 text-[#ECE8E1]">
+      <header className="space-y-3 border-b border-white/10 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
+        <div className="flex items-center justify-between">
+          <h1 className="text-lg font-black tracking-tight">{TAB_TITLES[tab]}</h1>
+          <div className="flex gap-1">
+            <button
+              type="button"
+              onClick={handleRefresh}
+              disabled={busy}
+              aria-label="상점 새로 불러오기"
+              className="p-2 hover:text-white disabled:opacity-50"
+            >
+              <RefreshCw size={20} className={busy ? 'animate-spin' : ''} />
+            </button>
+            <button type="button" onClick={handleLogout} aria-label="로그아웃" className="p-2 hover:text-white">
+              <LogOut size={20} />
+            </button>
+          </div>
         </div>
+        <ProfileBar riotId={shop.riotId} wallet={shop.wallet} />
       </header>
 
       <main className="mx-auto max-w-5xl space-y-5 px-4 py-5">
-        {remaining === 0 && (
-          <div className="flex items-center justify-between bg-[#1B2733] p-3 text-sm">
-            <span>새 상점이 열렸어요.</span>
-            <button type="button" onClick={handleRefresh} className="font-bold text-[#FF4655]">
-              다시 불러오기
-            </button>
-          </div>
+        {error && <p className="break-words text-sm text-[#FF4655]">{error}</p>}
+
+        {tab === 'shop' && (
+          <>
+            {wishAlert.length > 0 && (
+              <div className="flex items-start justify-between gap-3 bg-[#FF4655]/15 p-3 text-sm">
+                <p className="flex items-start gap-2 font-bold">
+                  <Heart size={16} color="#FF4655" fill="#FF4655" className="mt-0.5 shrink-0" />
+                  위시리스트 스킨이 상점에 떴어요! {wishAlert.join(', ')}
+                </p>
+                <button type="button" onClick={() => setWishAlert([])} className="shrink-0 text-xs text-[#ECE8E1]/70">
+                  닫기
+                </button>
+              </div>
+            )}
+            <p className="text-xs text-[#ECE8E1]/60">
+              {shopLeft > 0 ? `상점 갱신까지 ${formatCountdown(shopLeft)}` : '새 상점이 열렸어요. 새로고침해 주세요.'}
+            </p>
+            <ShopGrid skins={shop.skins} revealedIds={revealed} selectedIds={selectedIds} wishIds={wishIds} onOpen={setDetailId} />
+            {vpPanel}
+          </>
         )}
-        {error && <p className="text-sm text-[#FF4655]">{error}</p>}
 
-        <ShopGrid
-          skins={skins}
-          revealedIds={revealed}
-          selectedIds={selectedIds}
-          onOpen={setDetailId}
-        />
-
-        <section
-          aria-label="VP 계산"
-          className="grid gap-4 bg-[#1B2733] p-4 sm:grid-cols-[1fr_auto] sm:items-end"
-        >
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label htmlFor="owned-vp" className="text-[11px] text-[#ECE8E1]/60">
-                보유 VP{shop.vp !== null ? ' (자동)' : ''}
-              </label>
-              <input
-                id="owned-vp"
-                inputMode="numeric"
-                value={ownedInput}
-                onChange={(e) => setOwnedInput(e.target.value.replace(/\D/g, '').slice(0, 7))}
-                onFocus={(e) => e.currentTarget.select()}
-                className="mt-1 h-11 w-full bg-[#0F1923] px-3 text-sm font-bold outline-none ring-1 ring-white/10 focus:ring-[#FF4655]"
-              />
-            </div>
-            <div>
-              <p className="text-[11px] text-[#ECE8E1]/60">담은 스킨 {selectedIds.length}개</p>
-              <p className="mt-1 flex h-11 items-center text-sm font-bold">{formatVp(totalVp)}</p>
-            </div>
-            <div>
-              <p className="text-[11px] text-[#ECE8E1]/60">부족한 VP</p>
-              <p className="mt-1 flex h-11 items-center text-sm font-bold text-[#FF4655]">
-                {formatVp(recommendations.neededVp)}
+        {tab === 'night' &&
+          (shop.night.length === 0 ? (
+            <p className="py-16 text-center text-sm text-[#ECE8E1]/60">지금은 야시장이 열려 있지 않아요.</p>
+          ) : (
+            <>
+              <p className="text-xs text-[#ECE8E1]/60">
+                야시장 종료까지 {formatCountdown(nightLeft)} · 할인가로 표시돼요
               </p>
-            </div>
-          </div>
+              <ShopGrid skins={shop.night} revealedIds={revealed} selectedIds={selectedIds} wishIds={wishIds} onOpen={setDetailId} />
+              {vpPanel}
+            </>
+          ))}
 
-          <button
-            type="button"
-            disabled={selectedIds.length === 0}
-            onClick={() => setGuideOpen(true)}
-            className="flex h-12 items-center justify-center gap-2 bg-[#FF4655] px-5 font-bold text-white hover:bg-[#ff5f6c] disabled:cursor-not-allowed disabled:opacity-40"
-            style={{ clipPath: NOTCH_CLIP }}
-          >
-            <Coins size={18} />
-            담은 스킨 VP 가이드
-          </button>
-        </section>
+        {tab === 'bundles' && <BundlesView bundles={shop.bundles} fetchedAt={shop.fetchedAt} now={now} />}
+
+        {tab === 'wish' && (
+          <WishlistView catalog={catalog} wishIds={wishIds} inShopIds={inShopIds} onToggle={toggleWish} />
+        )}
+
+        {tab === 'collection' && (
+          <CollectionView
+            catalog={catalog}
+            ownedSkinIds={shop.ownedSkinIds}
+            stats={stats}
+            wishCount={wishIds.length}
+            onShareBadges={handleShareBadges}
+          />
+        )}
       </main>
+
+      <TabBar tab={tab} onTab={handleTab} wishDot={wishAlert.length > 0} />
 
       <AnimatePresence>
         {detailSkin && (
@@ -511,11 +653,14 @@ export default function App() {
             key={detailSkin.id}
             skin={detailSkin}
             revealed={revealed.has(detailSkin.id)}
-            onReveal={() => markRevealed(detailSkin.id)}
+            onReveal={() => markRevealed(detailSkin)}
             onClose={() => setDetailId(null)}
             selected={selectedIds.includes(detailSkin.id)}
             onToggleSelect={() => toggleSelect(detailSkin.id)}
             ownedVp={ownedVp}
+            wished={wishIds.includes(detailSkin.skinId)}
+            onToggleWish={() => toggleWish(detailSkin.skinId)}
+            onShared={() => bumpStats((s) => ({ ...s, shares: s.shares + 1 }))}
           />
         )}
       </AnimatePresence>

@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { Check, Coins, Plus, Share2, X } from 'lucide-react';
+import { Check, Coins, Heart, Play, Plus, Share2, X } from 'lucide-react';
 import ScratchCard from './ScratchCard';
 import TierEffects from './TierEffects';
 import VpGuideModal from './VpGuideModal';
+import WishCelebration from './WishCelebration';
 import { NOTCH_CLIP, TIER_STYLES } from '../types/valorant';
 import type { ValorantSkin } from '../types/valorant';
 import { shareSkin } from '../utils/shareCard';
@@ -17,6 +18,9 @@ interface SkinDetailProps {
   selected: boolean;
   onToggleSelect: () => void;
   ownedVp: number;
+  wished: boolean;
+  onToggleWish: () => void;
+  onShared: () => void;
 }
 
 export default function SkinDetail({
@@ -27,19 +31,25 @@ export default function SkinDetail({
   selected,
   onToggleSelect,
   ownedVp,
+  wished,
+  onToggleWish,
+  onShared,
 }: SkinDetailProps) {
   const style = TIER_STYLES[skin.tier];
   const reduce = useReducedMotion();
 
   const [effectKey, setEffectKey] = useState(0);
+  const [wishKey, setWishKey] = useState(0);
   const [chromaIdx, setChromaIdx] = useState(0);
   const [guideOpen, setGuideOpen] = useState(false);
+  const [videoOpen, setVideoOpen] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [shareMsg, setShareMsg] = useState<string | null>(null);
 
   const recs = useMemo(() => calculateVpRecommendations(skin.price, ownedVp), [skin.price, ownedVp]);
   const chroma = skin.chromas[chromaIdx];
   const imageUrl = chroma?.imageUrl || skin.imageUrl;
+  const videoUrl = chroma?.videoUrl ?? skin.videoUrl;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -56,6 +66,7 @@ export default function SkinDetail({
 
   const handleReveal = () => {
     setEffectKey((k) => k + 1);
+    if (wished) setWishKey((k) => k + 1);
     onReveal();
   };
 
@@ -64,6 +75,7 @@ export default function SkinDetail({
     setShareMsg(null);
     const result = await shareSkin(skin, imageUrl);
     setSharing(false);
+    if (result === 'shared' || result === 'downloaded') onShared();
     if (result === 'downloaded') setShareMsg('이미지를 저장했어요.');
     else if (result === 'failed') setShareMsg('공유하지 못했어요. 잠시 뒤 다시 시도해 주세요.');
   };
@@ -93,14 +105,27 @@ export default function SkinDetail({
           <span className="text-sm text-[#ECE8E1]/70">
             {revealed ? `${style.label} 스킨` : '카드를 문질러 보세요'}
           </span>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="닫기"
-            className="p-2 text-[#ECE8E1]/80 hover:text-white"
-          >
-            <X size={22} />
-          </button>
+          <div className="flex items-center">
+            {revealed && (
+              <button
+                type="button"
+                onClick={onToggleWish}
+                aria-pressed={wished}
+                aria-label={wished ? '위시리스트에서 빼기' : '위시리스트에 담기'}
+                className="p-2"
+              >
+                <Heart size={22} color={wished ? '#FF4655' : '#ECE8E1'} fill={wished ? '#FF4655' : 'none'} />
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="닫기"
+              className="p-2 text-[#ECE8E1]/80 hover:text-white"
+            >
+              <X size={22} />
+            </button>
+          </div>
         </div>
 
         <motion.div animate={reaction} transition={{ duration: 0.7 }}>
@@ -116,7 +141,7 @@ export default function SkinDetail({
 
         {!revealed && (
           <p className="text-center text-xs text-[#ECE8E1]/60">
-            한 번 열면 다시 긁을 수 없어요. 천천히 문질러 보세요.
+            한 번 열면 다시 긁을 수 없어요. 크게 문질러 보세요.
           </p>
         )}
 
@@ -128,6 +153,37 @@ export default function SkinDetail({
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: reduce ? 0 : 0.5, duration: 0.4 }}
             >
+              {skin.discountPercent !== undefined && skin.discountPercent > 0 && (
+                <p className="bg-[#B66BFF]/20 px-3 py-2 text-sm font-bold text-[#E2C8FF]">
+                  야시장 {skin.discountPercent}% 할인 · {formatVp(skin.originalPrice ?? skin.price)} →{' '}
+                  {formatVp(skin.price)}
+                </p>
+              )}
+
+              {videoUrl && (
+                <section aria-label="영상 미리보기">
+                  <button
+                    type="button"
+                    onClick={() => setVideoOpen((o) => !o)}
+                    className="flex h-11 w-full items-center justify-center gap-2 bg-[#1B2733] text-sm font-bold hover:bg-[#223244]"
+                  >
+                    <Play size={16} />
+                    {videoOpen ? '영상 닫기' : '스킨 영상 미리보기'}
+                  </button>
+                  {videoOpen && (
+                    <video
+                      key={videoUrl}
+                      src={videoUrl}
+                      controls
+                      autoPlay
+                      playsInline
+                      className="mt-2 w-full bg-black"
+                    />
+                  )}
+                  <p className="mt-1 text-[11px] text-[#ECE8E1]/50">영상은 재생할 때만 데이터를 써요.</p>
+                </section>
+              )}
+
               {skin.chromas.length > 1 && (
                 <section aria-label="크로마">
                   <h3 className="mb-2 text-sm font-bold">크로마 {skin.chromas.length}종</h3>
@@ -163,9 +219,7 @@ export default function SkinDetail({
                   <Coins size={16} color="#FF4655" />이 스킨 사려면
                 </h3>
                 {recs.neededVp === 0 ? (
-                  <p className="mt-2 text-sm">
-                    보유 VP({formatVp(ownedVp)})로 바로 살 수 있어요.
-                  </p>
+                  <p className="mt-2 text-sm">보유 VP({formatVp(ownedVp)})로 바로 살 수 있어요.</p>
                 ) : (
                   smart && (
                     <>
@@ -225,6 +279,7 @@ export default function SkinDetail({
       </div>
 
       <TierEffects tier={skin.tier} playKey={effectKey} />
+      <WishCelebration playKey={wishKey} name={skin.name} />
       <VpGuideModal open={guideOpen} onClose={() => setGuideOpen(false)} recommendations={recs} />
     </motion.div>
   );

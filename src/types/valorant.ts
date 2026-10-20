@@ -8,21 +8,65 @@ export interface SkinChroma {
   name: string;
   imageUrl: string;
   swatchUrl: string | null;
+  videoUrl: string | null;
 }
 
 export interface ValorantSkin {
-  /** 상점 OfferID (= 스킨 레벨 UUID) */
+  /** 화면/저장용 고유 키 (일반 상점: OfferID, 야시장: nm-OfferID) */
   id: string;
+  /** 스킨 UUID (위시리스트/컬렉션 매칭용) */
+  skinId: string;
   name: string;
   /** 총기 종류 (예: Vandal) */
   weapon: string;
-  /** VP 가격 */
+  /** 지금 결제해야 하는 VP (야시장은 할인가) */
   price: number;
   tier: SkinTier;
   /** 실제 스킨 이미지 URL */
   imageUrl: string;
   chromas: SkinChroma[];
   levelCount: number;
+  /** 미리보기 영상 URL (없으면 null) */
+  videoUrl: string | null;
+  /** 야시장 정가 / 할인율 */
+  originalPrice?: number;
+  discountPercent?: number;
+}
+
+export interface Wallet {
+  vp: number | null;
+  radianite: number | null;
+  kingdom: number | null;
+}
+
+export interface BundleItem {
+  name: string;
+  imageUrl: string;
+  price: number | null;
+}
+
+export interface ShopBundle {
+  id: string;
+  name: string;
+  imageUrl: string;
+  items: BundleItem[];
+  /** 스킨이 아닌 구성품(스프레이, 총기 장식 등) 개수 */
+  otherCount: number;
+  basePrice: number | null;
+  price: number | null;
+  discountPercent: number | null;
+  remainingSeconds: number;
+}
+
+/** 위시리스트 검색/컬렉션 표시용으로 기기에 저장하는 가벼운 스킨 목록 */
+export interface CatalogSkin {
+  id: string;
+  name: string;
+  weapon: string;
+  tier: SkinTier;
+  imageUrl: string;
+  /** 1레벨 UUID (보유 여부 판별용) */
+  level1: string;
 }
 
 export interface DailyShop {
@@ -30,8 +74,13 @@ export interface DailyShop {
   remainingSeconds: number;
   /** 불러온 시각 (epoch ms) */
   fetchedAt: number;
-  /** 지갑의 보유 VP (조회 실패 시 null) */
-  vp: number | null;
+  riotId: string;
+  wallet: Wallet;
+  night: ValorantSkin[];
+  nightRemainingSeconds: number;
+  bundles: ShopBundle[];
+  /** 내가 가진 스킨 UUID 목록 */
+  ownedSkinIds: string[];
 }
 
 export interface VpPackage {
