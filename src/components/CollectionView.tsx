@@ -39,6 +39,7 @@ interface CollectionViewProps {
   stats: UserStats;
   wishCount: number;
   onShareBadges: (ownedCount: number, badges: BadgeShareItem[]) => Promise<ShareResult>;
+  onOpen: (skin: CatalogSkin) => void;
 }
 
 export default function CollectionView({
@@ -47,6 +48,7 @@ export default function CollectionView({
   stats,
   wishCount,
   onShareBadges,
+  onOpen,
 }: CollectionViewProps) {
   const [filter, setFilter] = useState<SkinTier | 'all'>('all');
   const [visible, setVisible] = useState(PAGE);
@@ -179,9 +181,15 @@ export default function CollectionView({
                 return (
                   <li
                     key={s.id}
-                    className="bg-[#1B2733] p-2"
+                    className="bg-[#1B2733]"
                     style={{ boxShadow: `inset 0 -3px 0 ${st.color}` }}
                   >
+                    <button
+                      type="button"
+                      onClick={() => onOpen(s)}
+                      aria-label={`${s.name} 미리보기`}
+                      className="block w-full p-2 text-left"
+                    >
                     <div className="h-14">
                       {s.imageUrl && (
                         <img
@@ -194,6 +202,7 @@ export default function CollectionView({
                       )}
                     </div>
                     <p className="mt-1 line-clamp-2 text-[11px] font-bold leading-tight">{s.name}</p>
+                    </button>
                   </li>
                 );
               })}

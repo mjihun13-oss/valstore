@@ -9,6 +9,7 @@ interface WishlistViewProps {
   /** 지금 상점(일반+야시장)에 나와 있는 스킨 UUID */
   inShopIds: Set<string>;
   onToggle: (skinId: string) => void;
+  onOpen: (skin: CatalogSkin) => void;
 }
 
 function Row({
@@ -16,28 +17,37 @@ function Row({
   wished,
   inShop,
   onToggle,
+  onOpen,
 }: {
   skin: CatalogSkin;
   wished: boolean;
   inShop: boolean;
   onToggle: () => void;
+  onOpen: () => void;
 }) {
   const style = TIER_STYLES[skin.tier];
   return (
     <li className="flex items-center gap-3 bg-[#1B2733] p-2">
-      <div className="h-14 w-20 shrink-0 bg-[#0F1923] p-1">
-        {skin.imageUrl && (
-          <img src={skin.imageUrl} alt="" draggable={false} loading="lazy" className="h-full w-full object-contain" />
-        )}
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-bold">{skin.name}</p>
-        <p className="mt-0.5 flex items-center gap-2 text-xs text-[#ECE8E1]/60">
-          <span style={{ color: style.color }}>{style.label}</span>
-          <span>{skin.weapon}</span>
-          {inShop && <span className="bg-[#FF4655] px-1 font-bold text-white">지금 상점에 있음</span>}
-        </p>
-      </div>
+      <button
+        type="button"
+        onClick={onOpen}
+        aria-label={`${skin.name} 미리보기`}
+        className="flex min-w-0 flex-1 items-center gap-3 text-left"
+      >
+        <div className="h-14 w-20 shrink-0 bg-[#0F1923] p-1">
+          {skin.imageUrl && (
+            <img src={skin.imageUrl} alt="" draggable={false} loading="lazy" className="h-full w-full object-contain" />
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-bold">{skin.name}</p>
+          <p className="mt-0.5 flex items-center gap-2 text-xs text-[#ECE8E1]/60">
+            <span style={{ color: style.color }}>{style.label}</span>
+            <span>{skin.weapon}</span>
+            {inShop && <span className="bg-[#FF4655] px-1 font-bold text-white">지금 상점에 있음</span>}
+          </p>
+        </div>
+      </button>
       <button
         type="button"
         onClick={onToggle}
@@ -51,7 +61,7 @@ function Row({
   );
 }
 
-export default function WishlistView({ catalog, wishIds, inShopIds, onToggle }: WishlistViewProps) {
+export default function WishlistView({ catalog, wishIds, inShopIds, onToggle, onOpen }: WishlistViewProps) {
   const [query, setQuery] = useState('');
 
   const wished = useMemo(
@@ -104,6 +114,7 @@ export default function WishlistView({ catalog, wishIds, inShopIds, onToggle }: 
                   wished={wishIds.includes(s.id)}
                   inShop={inShopIds.has(s.id)}
                   onToggle={() => onToggle(s.id)}
+                  onOpen={() => onOpen(s)}
                 />
               ))}
             </ul>
@@ -118,7 +129,14 @@ export default function WishlistView({ catalog, wishIds, inShopIds, onToggle }: 
         ) : (
           <ul className="space-y-2">
             {wished.map((s) => (
-              <Row key={s.id} skin={s} wished inShop={inShopIds.has(s.id)} onToggle={() => onToggle(s.id)} />
+              <Row
+                key={s.id}
+                skin={s}
+                wished
+                inShop={inShopIds.has(s.id)}
+                onToggle={() => onToggle(s.id)}
+                onOpen={() => onOpen(s)}
+              />
             ))}
           </ul>
         )}

@@ -11,11 +11,13 @@ import {
   LogOut,
   RefreshCw,
 } from 'lucide-react';
+import BundleDetail from './components/BundleDetail';
 import BundlesView from './components/BundlesView';
 import CollectionView from './components/CollectionView';
 import ProfileBar from './components/ProfileBar';
 import ShopGrid from './components/ShopGrid';
 import SkinDetail from './components/SkinDetail';
+import SkinPreview from './components/SkinPreview';
 import TabBar from './components/TabBar';
 import type { Tab } from './components/TabBar';
 import VpGuideModal from './components/VpGuideModal';
@@ -32,7 +34,7 @@ import {
 } from './services/riotStore';
 import type { Region } from './services/riotStore';
 import { NOTCH_CLIP } from './types/valorant';
-import type { CatalogSkin, DailyShop, ValorantSkin } from './types/valorant';
+import type { BundleItem, CatalogSkin, DailyShop, PreviewSkin, ValorantSkin } from './types/valorant';
 import { shareBadges } from './utils/shareCard';
 import type { BadgeShareItem, ShareResult } from './utils/shareCard';
 import {
@@ -293,6 +295,8 @@ export default function App() {
   const [stats, setStats] = useState<UserStats>(() => loadStats());
   const [catalog, setCatalog] = useState<CatalogSkin[]>(() => loadCatalog());
   const [wishAlert, setWishAlert] = useState<string[]>([]);
+  const [preview, setPreview] = useState<PreviewSkin | null>(null);
+  const [bundleId, setBundleId] = useState<string | null>(null);
   const nightCounted = useRef(false);
   const now = useNow(shop !== null);
 
@@ -482,6 +486,21 @@ export default function App() {
     return r;
   };
 
+  const openCatalogPreview = (c: CatalogSkin) =>
+    setPreview({ skinId: c.id, name: c.name, weapon: c.weapon, tier: c.tier, imageUrl: c.imageUrl });
+
+  const openItemPreview = (it: BundleItem) => {
+    if (!it.skinId) return;
+    setPreview({
+      skinId: it.skinId,
+      name: it.name,
+      weapon: it.weapon ?? '',
+      tier: it.tier ?? 'Select',
+      imageUrl: it.imageUrl,
+      price: it.price,
+    });
+  };
+
   const ownedVp = Number(ownedInput) || 0;
   const allSkins = useMemo(() => (shop ? [...shop.skins, ...shop.night] : []), [shop]);
   const totalVp = useMemo(
@@ -494,6 +513,7 @@ export default function App() {
   );
   const inShopIds = useMemo(() => new Set(allSkins.map((s) => s.skinId)), [allSkins]);
   const detailSkin = allSkins.find((s) => s.id === detailId) ?? null;
+  const bundleDetail = shop?.bundles.find((b) => b.id === bundleId) ?? null;
 
   if (phase === 'boot') {
     return (
@@ -628,10 +648,24 @@ export default function App() {
             </>
           ))}
 
-        {tab === 'bundles' && <BundlesView bundles={shop.bundles} fetchedAt={shop.fetchedAt} now={now} />}
+        {tab === 'bundles' && (
+          <BundlesView
+            bundles={shop.bundles}
+            fetchedAt={shop.fetchedAt}
+            now={now}
+            onOpenBundle={setBundleId}
+            onOpenItem={openItemPreview}
+          />
+        )}
 
         {tab === 'wish' && (
-          <WishlistView catalog={catalog} wishIds={wishIds} inShopIds={inShopIds} onToggle={toggleWish} />
+          <WishlistView
+            catalog={catalog}
+            wishIds={wishIds}
+            inShopIds={inShopIds}
+            onToggle={toggleWish}
+            onOpen={openCatalogPreview}
+          />
         )}
 
         {tab === 'collection' && (
@@ -641,6 +675,7 @@ export default function App() {
             stats={stats}
             wishCount={wishIds.length}
             onShareBadges={handleShareBadges}
+            onOpen={openCatalogPreview}
           />
         )}
       </main>
@@ -661,6 +696,33 @@ export default function App() {
             wished={wishIds.includes(detailSkin.skinId)}
             onToggleWish={() => toggleWish(detailSkin.skinId)}
             onShared={() => bumpStats((s) => ({ ...s, shares: s.shares + 1 }))}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {bundleDetail && (
+          <BundleDetail
+            key={bundleDetail.id}
+            bundle={bundleDetail}
+            fetchedAt={shop.fetchedAt}
+            now={now}
+            ownedVp={ownedVp}
+            onClose={() => setBundleId(null)}
+            onOpenItem={openItemPreview}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {preview && (
+          <SkinPreview
+            key={preview.skinId}
+            skin={preview}
+            onClose={() => setPreview(null)}
+            wished={wishIds.includes(preview.skinId)}
+            onToggleWish={() => toggleWish(preview.skinId)}
+            owned={shop.ownedSkinIds.includes(preview.skinId)}
           />
         )}
       </AnimatePresence>

@@ -42,7 +42,13 @@ export interface Wallet {
 export interface BundleItem {
   name: string;
   imageUrl: string;
+  /** 이 구성품을 따로 살 때의 가격 */
   price: number | null;
+  basePrice?: number | null;
+  /** 미리보기를 열 수 있는 스킨이면 값이 있다 */
+  skinId?: string;
+  weapon?: string;
+  tier?: SkinTier;
 }
 
 export interface ShopBundle {
@@ -56,6 +62,19 @@ export interface ShopBundle {
   price: number | null;
   discountPercent: number | null;
   remainingSeconds: number;
+  /** 구성품 정가 합계 / 구성품을 따로 샀을 때 가격 합계 */
+  itemsBaseTotal?: number | null;
+  itemsPriceTotal?: number | null;
+}
+
+/** 위시리스트·세트·컬렉션에서 스킨을 눌렀을 때 보여주는 미리보기용 정보 */
+export interface PreviewSkin {
+  skinId: string;
+  name: string;
+  weapon: string;
+  tier: SkinTier;
+  imageUrl: string;
+  price?: number | null;
 }
 
 /** 위시리스트 검색/컬렉션 표시용으로 기기에 저장하는 가벼운 스킨 목록 */

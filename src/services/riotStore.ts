@@ -376,14 +376,24 @@ export async function fetchMyShop(accessToken: string, region: Region): Promise<
     const info = bundleInfo.get(b.DataAssetID);
     const items: BundleItem[] = [];
     let otherCount = 0;
+    let baseSum = 0;
+    let priceSum = 0;
     for (const it of b.Items ?? []) {
       const price = it.DiscountedPrice ?? it.BasePrice ?? null;
+      baseSum += it.BasePrice ?? price ?? 0;
+      priceSum += price ?? 0;
       if (it.Item.ItemTypeID === SKIN_LEVEL_TYPE) {
         const hit = cat.byLevel.get(it.Item.ItemID);
         items.push({
           name: hit?.skin.displayName ?? '스킨',
           imageUrl: hit?.skin.displayIcon ?? hit?.skin.levels[0]?.displayIcon ?? '',
           price,
+          basePrice: it.BasePrice ?? null,
+          skinId: hit?.skin.uuid,
+          weapon: hit?.weapon,
+          tier: hit
+            ? toTier(hit.skin.contentTierUuid ? cat.tierById.get(hit.skin.contentTierUuid) : undefined)
+            : undefined,
         });
       } else {
         otherCount += 1;
@@ -399,6 +409,8 @@ export async function fetchMyShop(accessToken: string, region: Region): Promise<
       price: firstValue(b.TotalDiscountedCost),
       discountPercent: b.TotalDiscountPercent ?? null,
       remainingSeconds: b.DurationRemainingInSeconds ?? 0,
+      itemsBaseTotal: baseSum || null,
+      itemsPriceTotal: priceSum || null,
     };
   });
 

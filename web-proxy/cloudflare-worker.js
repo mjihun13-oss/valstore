@@ -12,7 +12,10 @@ export default {
     const cors = {
       'Access-Control-Allow-Origin': env.ALLOWED_ORIGIN || '*',
       'Access-Control-Allow-Methods': 'GET,POST,PUT,OPTIONS',
-      'Access-Control-Allow-Headers': '*',
+      // Authorization 은 '*' 로는 허용되지 않아서, 브라우저가 요청한 헤더를 그대로 허용한다.
+      'Access-Control-Allow-Headers':
+        request.headers.get('Access-Control-Request-Headers') ||
+        'authorization,content-type,x-riot-entitlements-jwt,x-riot-clientplatform,x-riot-clientversion',
       'Access-Control-Max-Age': '86400',
     };
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });

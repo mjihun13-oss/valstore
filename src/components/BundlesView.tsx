@@ -1,19 +1,19 @@
-import type { ShopBundle } from '../types/valorant';
+import type { BundleItem, ShopBundle } from '../types/valorant';
 import { formatCountdown, secondsLeft } from '../utils/time';
 
 interface BundlesViewProps {
   bundles: ShopBundle[];
   fetchedAt: number;
   now: number;
+  onOpenBundle: (id: string) => void;
+  onOpenItem: (item: BundleItem) => void;
 }
 
 const vp = (n: number | null): string => (n === null ? '-' : `${n.toLocaleString('ko-KR')} VP`);
 
-export default function BundlesView({ bundles, fetchedAt, now }: BundlesViewProps) {
+export default function BundlesView({ bundles, fetchedAt, now, onOpenBundle, onOpenItem }: BundlesViewProps) {
   if (bundles.length === 0) {
-    return (
-      <p className="py-16 text-center text-sm text-[#ECE8E1]/60">지금 판매 중인 세트가 없어요.</p>
-    );
+    return <p className="py-16 text-center text-sm text-[#ECE8E1]/60">지금 판매 중인 세트가 없어요.</p>;
   }
 
   return (
@@ -46,12 +46,20 @@ export default function BundlesView({ bundles, fetchedAt, now }: BundlesViewProp
               {b.items.length > 0 && (
                 <ul className="grid grid-cols-2 gap-2">
                   {b.items.map((it, i) => (
-                    <li key={`${it.name}-${i}`} className="bg-[#0F1923] p-2">
-                      {it.imageUrl && (
-                        <img src={it.imageUrl} alt="" draggable={false} className="h-16 w-full object-contain" />
-                      )}
-                      <p className="mt-1 line-clamp-2 text-xs font-bold leading-tight">{it.name}</p>
-                      <p className="mt-0.5 text-[11px] text-[#ECE8E1]/60">{vp(it.price)}</p>
+                    <li key={`${it.name}-${i}`}>
+                      <button
+                        type="button"
+                        disabled={!it.skinId}
+                        onClick={() => onOpenItem(it)}
+                        aria-label={`${it.name} 미리보기`}
+                        className="block w-full bg-[#0F1923] p-2 text-left disabled:cursor-default"
+                      >
+                        {it.imageUrl && (
+                          <img src={it.imageUrl} alt="" draggable={false} className="h-16 w-full object-contain" />
+                        )}
+                        <p className="mt-1 line-clamp-2 text-xs font-bold leading-tight">{it.name}</p>
+                        <p className="mt-0.5 text-[11px] text-[#ECE8E1]/60">{vp(it.price)}</p>
+                      </button>
                     </li>
                   ))}
                 </ul>
@@ -59,6 +67,14 @@ export default function BundlesView({ bundles, fetchedAt, now }: BundlesViewProp
               {b.otherCount > 0 && (
                 <p className="text-xs text-[#ECE8E1]/60">그 외 스프레이·장식 등 {b.otherCount}개 포함</p>
               )}
+
+              <button
+                type="button"
+                onClick={() => onOpenBundle(b.id)}
+                className="h-11 w-full bg-[#FF4655] text-sm font-bold text-white hover:bg-[#ff5f6c]"
+              >
+                가격 비교 · VP 구매 추천 보기
+              </button>
             </div>
           </article>
         );
