@@ -4,6 +4,49 @@ import { RIOT_LOGIN_URL } from './riotStore';
 
 export class LoginCancelledError extends Error {}
 
+/**
+ * 웹 버전: Riot 로그인을 새 탭으로 열고, 로그인 후 주소를 복사해서 이 탭으로 돌아오면
+ * 클립보드를 확인해 자동으로 이어간다. (브라우저가 클립보드 읽기를 허용해야 한다)
+ */
+function webLoginViaClipboard(): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    window.open(RIOT_LOGIN_URL, '_blank');
+    let done = false;
+
+    const cleanup = () => {
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.clearTimeout(timer);
+    };
+    const attempt = async () => {
+      if (done) return;
+      try {
+        const text = await navigator.clipboard.readText();
+        if (text.includes('access_token=')) {
+          done = true;
+          cleanup();
+          resolve(text);
+        }
+      } catch {
+        /* 클립보드 권한이 없으면 붙여넣기로 로그인한다 */
+      }
+    };
+    const onFocus = () => void attempt();
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void attempt();
+    };
+    const timer = window.setTimeout(() => {
+      if (done) return;
+      done = true;
+      cleanup();
+      reject(new LoginCancelledError('timeout'));
+    }, 5 * 60 * 1000);
+
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisible);
+  });
+}
+
 interface ListenerHandle {
   remove: () => Promise<void> | void;
 }
@@ -20,9 +63,7 @@ interface InAppBrowserLike {
  * 그 주소를 돌려준다. 이미 Riot에 로그인된 기기면 창이 거의 바로 닫힌다.
  */
 export async function riotWebLogin(): Promise<string> {
-  if (!Capacitor.isNativePlatform()) {
-    throw new Error('자동 로그인은 설치한 앱에서만 돼요. 아래에서 주소를 직접 붙여넣어 주세요.');
-  }
+  if (!Capacitor.isNativePlatform()) return webLoginViaClipboard();
   const iab = InAppBrowser as unknown as InAppBrowserLike;
   const handles: ListenerHandle[] = [];
 

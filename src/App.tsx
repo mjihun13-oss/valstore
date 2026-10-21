@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { Browser } from '@capacitor/browser';
+import { Capacitor } from '@capacitor/core';
 import {
   ClipboardPaste,
   Coins,
@@ -81,6 +82,7 @@ interface LoginScreenProps {
   busy: boolean;
   error: string | null;
   mfaEmail: string | null;
+  notice: string | null;
   onWebLogin: () => void;
   onPasswordLogin: (username: string, password: string) => void;
   onMfa: (code: string) => void;
@@ -96,6 +98,7 @@ function LoginScreen({
   busy,
   error,
   mfaEmail,
+  notice,
   onWebLogin,
   onPasswordLogin,
   onMfa,
@@ -159,10 +162,11 @@ function LoginScreen({
         Riot 계정으로 로그인
       </button>
 
+      {notice && <p className="text-sm leading-relaxed text-[#ECE8E1]/80">{notice}</p>}
       {error && <p className="break-words text-sm text-[#FF4655]">{error}</p>}
 
       <details className="text-sm text-[#ECE8E1]/70" open={mfaEmail !== null}>
-        <summary className="cursor-pointer select-none">아이디/비밀번호로 로그인 (앱 전용)</summary>
+        <summary className="cursor-pointer select-none">아이디/비밀번호로 로그인</summary>
         <div className="mt-3 space-y-2">
           {mfaEmail === null ? (
             <>
@@ -290,6 +294,7 @@ export default function App() {
   const [detailId, setDetailId] = useState<string | null>(null);
   const [guideOpen, setGuideOpen] = useState(false);
   const [mfaEmail, setMfaEmail] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>('shop');
   const [wishIds, setWishIds] = useState<string[]>(() => loadWishlist());
   const [stats, setStats] = useState<UserStats>(() => loadStats());
@@ -387,13 +392,21 @@ export default function App() {
 
   const handleWebLogin = async () => {
     setError(null);
-    setBusy(true);
+    const native = Capacitor.isNativePlatform();
+    if (native) setBusy(true);
+    else {
+      setNotice(
+        '새 탭에서 Riot 로그인을 마친 뒤, 주소창의 주소를 복사하고 이 탭으로 돌아오세요. 자동으로 이어져요. 안 되면 아래 "주소를 붙여넣어 로그인"을 쓰세요.',
+      );
+    }
     try {
       const url = await riotWebLogin();
       setBusy(false);
+      setNotice(null);
       handleSubmit(url);
     } catch (e) {
       setBusy(false);
+      setNotice(null);
       if (e instanceof LoginCancelledError) return;
       setError(
         e instanceof Error
@@ -539,6 +552,7 @@ export default function App() {
           busy={busy}
           error={error}
           mfaEmail={mfaEmail}
+          notice={notice}
           onWebLogin={handleWebLogin}
           onPasswordLogin={(u, p) => void finishPassword(() => riotPasswordLogin(u, p))}
           onMfa={(c) => void finishPassword(() => riotSubmitMfa(c))}
