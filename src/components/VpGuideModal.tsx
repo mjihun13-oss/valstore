@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useScrollLock } from '../utils/scrollLock';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Coins, Sparkles, Target, TrendingUp, X } from 'lucide-react';
 import { NOTCH_CLIP } from '../types/valorant';
@@ -85,18 +86,15 @@ function RecommendationCard({
 export default function VpGuideModal({ open, onClose, recommendations }: VpGuideModalProps) {
   const [selected, setSelected] = useState<PickKey>('smartPick');
 
+  useScrollLock(open);
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
     window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('keydown', onKey);
-      document.body.style.overflow = prevOverflow;
-    };
+    return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
 
   const current = recommendations ? recommendations[selected] : null;

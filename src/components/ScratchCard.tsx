@@ -13,9 +13,9 @@ interface ScratchCardProps {
 }
 
 /** 이 비율 이상 긁으면 나머지가 깔끔하게 지워진다 */
-const REVEAL_THRESHOLD = 0.65;
-/** 붓 굵기 (카드 너비 대비) */
-const BRUSH_RATIO = 0.13;
+const REVEAL_THRESHOLD = 0.7;
+/** 붓 지름(CSS px). 손가락 한 마디 굵기 */
+const BRUSH_DIAMETER = 52;
 const MEASURE_INTERVAL_MS = 120;
 const MAX_PARTICLES = 420;
 
@@ -255,14 +255,27 @@ export default function ScratchCard({ skin, revealed, onReveal, imageUrl }: Scra
     const p = toPoint(e, canvas);
     const from = isStart || !lastPoint.current ? p : lastPoint.current;
 
+    // 지우개처럼 완전히 투명하게 지운다. 선과 촘촘한 원을 함께 그려 가장자리 틈이 없게 한다.
+    const radius = (BRUSH_DIAMETER / 2) * dprRef.current;
     ctx.globalCompositeOperation = 'destination-out';
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#000';
+    ctx.strokeStyle = '#000';
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-    ctx.lineWidth = canvas.width * BRUSH_RATIO;
+    ctx.lineWidth = radius * 2;
     ctx.beginPath();
     ctx.moveTo(from.x, from.y);
     ctx.lineTo(p.x + 0.01, p.y);
     ctx.stroke();
+    const dist = Math.hypot(p.x - from.x, p.y - from.y);
+    const steps = Math.max(1, Math.ceil(dist / (radius * 0.5)));
+    for (let i = 0; i <= steps; i += 1) {
+      const t = i / steps;
+      ctx.beginPath();
+      ctx.arc(from.x + (p.x - from.x) * t, from.y + (p.y - from.y) * t, radius, 0, Math.PI * 2);
+      ctx.fill();
+    }
     lastPoint.current = p;
     emit(p.x, p.y);
   };

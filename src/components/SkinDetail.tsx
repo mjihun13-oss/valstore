@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useScrollLock } from '../utils/scrollLock';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { Check, Coins, Heart, Play, Plus, Share2, X } from 'lucide-react';
 import ScratchCard from './ScratchCard';
@@ -51,17 +52,14 @@ export default function SkinDetail({
   const imageUrl = chroma?.imageUrl || skin.imageUrl;
   const videoUrl = chroma?.videoUrl ?? skin.videoUrl;
 
+  useScrollLock();
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !guideOpen) onClose();
     };
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
     window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('keydown', onKey);
-      document.body.style.overflow = prev;
-    };
+    return () => window.removeEventListener('keydown', onKey);
   }, [onClose, guideOpen]);
 
   const handleReveal = () => {
@@ -159,6 +157,13 @@ export default function SkinDetail({
                   {formatVp(skin.price)}
                 </p>
               )}
+
+              <p className="flex items-baseline justify-between bg-[#1B2733] px-3 py-2">
+                <span className="text-sm text-[#ECE8E1]/70">스킨 가격</span>
+                <b className="text-lg" style={{ color: style.color }}>
+                  {formatVp(skin.price)}
+                </b>
+              </p>
 
               {videoUrl && (
                 <section aria-label="영상 미리보기">

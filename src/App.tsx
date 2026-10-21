@@ -487,7 +487,14 @@ export default function App() {
   };
 
   const openCatalogPreview = (c: CatalogSkin) =>
-    setPreview({ skinId: c.id, name: c.name, weapon: c.weapon, tier: c.tier, imageUrl: c.imageUrl });
+    setPreview({
+      skinId: c.id,
+      name: c.name,
+      weapon: c.weapon,
+      tier: c.tier,
+      imageUrl: c.imageUrl,
+      price: c.price ?? null,
+    });
 
   const openItemPreview = (it: BundleItem) => {
     if (!it.skinId) return;
@@ -723,6 +730,7 @@ export default function App() {
             wished={wishIds.includes(preview.skinId)}
             onToggleWish={() => toggleWish(preview.skinId)}
             owned={shop.ownedSkinIds.includes(preview.skinId)}
+            ownedVp={ownedVp}
           />
         )}
       </AnimatePresence>

@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useScrollLock } from '../utils/scrollLock';
 import { motion } from 'framer-motion';
 import { Coins, TrendingDown, X } from 'lucide-react';
+import VpAdvice from './VpAdvice';
 import VpGuideModal from './VpGuideModal';
 import { TIER_STYLES } from '../types/valorant';
 import type { BundleItem, ShopBundle } from '../types/valorant';
@@ -33,17 +35,14 @@ export default function BundleDetail({ bundle, fetchedAt, now, ownedVp, onClose,
   const [guideOpen, setGuideOpen] = useState(false);
   const [picked, setPicked] = useState<number[]>([]);
 
+  useScrollLock();
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !guideOpen) onClose();
     };
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
     window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('keydown', onKey);
-      document.body.style.overflow = prev;
-    };
+    return () => window.removeEventListener('keydown', onKey);
   }, [onClose, guideOpen]);
 
   const price = bundle.price;
@@ -168,6 +167,11 @@ export default function BundleDetail({ bundle, fetchedAt, now, ownedVp, onClose,
                   ? `세트(${formatVp(price)})가 ${formatVp(pickedTotal - price)} 더 싸고 구성품도 더 많이 받아요.`
                   : `세트보다 ${formatVp(price - pickedTotal)} 아낄 수 있지만 나머지 구성품은 받지 못해요.`}
               </p>
+            </div>
+          )}
+          {picked.length > 0 && pickedTotal > 0 && (
+            <div className="mt-3">
+              <VpAdvice title="고른 스킨만 따로 사려면" price={pickedTotal} ownedVp={ownedVp} />
             </div>
           )}
         </section>

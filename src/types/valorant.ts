@@ -86,6 +86,8 @@ export interface CatalogSkin {
   imageUrl: string;
   /** 1레벨 UUID (보유 여부 판별용) */
   level1: string;
+  /** 상점 정가(VP). 판매 정보가 없으면 null */
+  price?: number | null;
 }
 
 export interface DailyShop {

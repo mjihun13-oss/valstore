@@ -199,6 +199,28 @@ async function loadWallet(
   }
 }
 
+/** 모든 상품의 정가(VP). 스킨은 OfferID 가 1레벨 UUID 와 같다. */
+async function loadOfferPrices(
+  base: string,
+  headers: Record<string, string>,
+): Promise<Map<string, number>> {
+  const prices = new Map<string, number>();
+  try {
+    const r = await http<{ Offers: { OfferID: string; Cost: CostMap }[] }>(
+      '스킨 가격 조회',
+      `${base}/store/v1/offers/`,
+      { headers },
+    );
+    for (const o of r.Offers) {
+      const v = firstValue(o.Cost);
+      if (v !== null) prices.set(o.OfferID, v);
+    }
+  } catch {
+    /* 가격 정보 없이도 동작한다 */
+  }
+  return prices;
+}
+
 /** 내가 가진 스킨 레벨 ID 목록 */
 async function loadOwnedLevels(
   base: string,
@@ -331,15 +353,19 @@ export async function fetchMyShop(accessToken: string, region: Region): Promise<
   };
   const base = `https://pd.${region}.a.pvp.net`;
 
-  const [store, wallet, ownedLevels, weapons, tiers] = await Promise.all([
+  const [store, wallet, ownedLevels, offerPrices, weapons, tiers] = await Promise.all([
     loadStorefront(base, user.sub, headers),
     loadWallet(base, user.sub, headers),
     loadOwnedLevels(base, user.sub, headers),
+    loadOfferPrices(base, headers),
     http<{ data: RawWeapon[] }>('스킨 정보 조회', 'https://valorant-api.com/v1/weapons?language=ko-KR'),
     http<{ data: { uuid: string; devName: string }[] }>('티어 정보 조회', 'https://valorant-api.com/v1/contenttiers'),
   ]);
 
   const cat = buildCatalog(weapons.data, tiers.data);
+  cat.slim.forEach((s) => {
+    s.price = offerPrices.get(s.level1) ?? null;
+  });
 
   // 일반 상점
   const layout = store.SkinsPanelLayout;

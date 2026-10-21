@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
+import { useScrollLock } from '../utils/scrollLock';
 import { motion } from 'framer-motion';
 import { Heart, Loader2, Play, X } from 'lucide-react';
+import VpAdvice from './VpAdvice';
 import { fetchSkinDetail } from '../services/skinDetail';
 import type { SkinDetailData } from '../services/skinDetail';
 import { TIER_STYLES } from '../types/valorant';
@@ -12,10 +14,11 @@ interface SkinPreviewProps {
   wished: boolean;
   onToggleWish: () => void;
   owned: boolean;
+  ownedVp: number;
 }
 
 /** 긁기 없이 스킨 이미지, 크로마, 영상을 바로 보는 미리보기 화면 */
-export default function SkinPreview({ skin, onClose, wished, onToggleWish, owned }: SkinPreviewProps) {
+export default function SkinPreview({ skin, onClose, wished, onToggleWish, owned, ownedVp }: SkinPreviewProps) {
   const style = TIER_STYLES[skin.tier];
   const [detail, setDetail] = useState<SkinDetailData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -36,17 +39,14 @@ export default function SkinPreview({ skin, onClose, wished, onToggleWish, owned
     };
   }, [skin.skinId]);
 
+  useScrollLock();
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
     window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('keydown', onKey);
-      document.body.style.overflow = prev;
-    };
+    return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
   const chromas = detail?.chromas ?? [];
@@ -114,6 +114,18 @@ export default function SkinPreview({ skin, onClose, wished, onToggleWish, owned
             {detail ? ` · ${detail.levelCount}레벨` : ''}
           </p>
         </div>
+
+        {!owned && skin.price ? (
+          <VpAdvice title="이 스킨 사려면" price={skin.price} ownedVp={ownedVp} />
+        ) : (
+          <p className="bg-[#1B2733] px-3 py-2 text-sm text-[#ECE8E1]/70">
+            {owned
+              ? skin.price
+                ? `이미 가진 스킨이에요 · 정가 ${skin.price.toLocaleString('ko-KR')} VP`
+                : '이미 가진 스킨이에요.'
+              : '지금은 가격 정보가 없어요. 판매하지 않는 스킨일 수 있어요.'}
+          </p>
+        )}
 
         {!detail && !error && (
           <p className="flex items-center gap-2 text-sm text-[#ECE8E1]/60">
