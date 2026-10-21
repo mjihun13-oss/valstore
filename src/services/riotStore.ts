@@ -67,7 +67,7 @@ function routed(url: string): string {
   if (!PROXY_URL || Capacitor.isNativePlatform()) return url;
   const host = new URL(url).hostname;
   if (host.endsWith('valorant-api.com')) return url;
-  return `${PROXY_URL}/?url=${encodeURIComponent(url)}`;
+  return `${PROXY_URL}?url=${encodeURIComponent(url)}`;
 }
 
 /** label 은 오류가 어느 단계에서 났는지 화면에 보여주기 위한 이름이다. */
